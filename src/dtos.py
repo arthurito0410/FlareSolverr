@@ -1,4 +1,3 @@
-
 STATUS_OK = "ok"
 STATUS_ERROR = "error"
 
@@ -44,13 +43,14 @@ class V1RequestBase(object):
     postData: str = None
     returnOnlyCookies: bool = None
     returnScreenshot: bool = None
-    download: bool = None   # deprecated v2.0.0, not used
-    returnRawHtml: bool = None  # deprecated v2.0.0, not used
+    download: bool = None  # used for image downloads via browser fetch
+    downloadUrls: list = None  # Optional: specific image URLs to download
     waitInSeconds: int = None
+    returnRawHtml: bool = None
     # Optional resource blocking flag (blocks images, CSS, and fonts)
     disableMedia: bool = None
     # Optional when you've got a turnstile captcha that needs to be clicked after X number of Tab presses
-    tabs_till_verify : int = None
+    tabs_till_verify: int = None
 
     def __init__(self, _dict):
         self.__dict__.update(_dict)

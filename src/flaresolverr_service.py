@@ -1,57 +1,75 @@
+import base64
 import logging
+import os
 import platform
 import sys
 import time
 from datetime import timedelta
 from html import escape
-from urllib.parse import unquote, quote
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
+import requests
 from func_timeout import FunctionTimedOut, func_timeout
 from selenium.common import TimeoutException
 from selenium.webdriver.chrome.webdriver import WebDriver
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.expected_conditions import (
-    presence_of_element_located, staleness_of, title_is)
-from selenium.webdriver.common.action_chains import ActionChains
+    presence_of_element_located,
+    staleness_of,
+    title_is,
+)
 from selenium.webdriver.support.wait import WebDriverWait
 
 import utils
-from dtos import (STATUS_ERROR, STATUS_OK, ChallengeResolutionResultT,
-                  ChallengeResolutionT, HealthResponse, IndexResponse,
-                  V1RequestBase, V1ResponseBase)
+from dtos import (
+    STATUS_ERROR,
+    STATUS_OK,
+    ChallengeResolutionResultT,
+    ChallengeResolutionT,
+    HealthResponse,
+    IndexResponse,
+    V1RequestBase,
+    V1ResponseBase,
+)
 from sessions import SessionsStorage
 
 ACCESS_DENIED_TITLES = [
     # Cloudflare
-    'Access denied',
+    "Access denied",
     # Cloudflare http://bitturk.net/ Firefox
-    'Attention Required! | Cloudflare'
+    "Attention Required! | Cloudflare",
 ]
 ACCESS_DENIED_SELECTORS = [
     # Cloudflare
-    'div.cf-error-title span.cf-code-label span',
+    "div.cf-error-title span.cf-code-label span",
     # Cloudflare http://bitturk.net/ Firefox
-    '#cf-error-details div.cf-error-overview h1'
+    "#cf-error-details div.cf-error-overview h1",
 ]
 CHALLENGE_TITLES = [
     # Cloudflare
-    'Just a moment...',
+    "Just a moment...",
     # DDoS-GUARD
-    'DDoS-Guard'
+    "DDoS-Guard",
 ]
 CHALLENGE_SELECTORS = [
     # Cloudflare
-    '#cf-challenge-running', '.ray_id', '.attack-box', '#cf-please-wait', '#challenge-spinner', '#trk_jschal_js', '#turnstile-wrapper', '.lds-ring',
+    "#cf-challenge-running",
+    ".ray_id",
+    ".attack-box",
+    "#cf-please-wait",
+    "#challenge-spinner",
+    "#trk_jschal_js",
+    "#turnstile-wrapper",
+    ".lds-ring",
     # Custom CloudFlare for EbookParadijs, Film-Paleis, MuziekFabriek and Puur-Hollands
-    'td.info #js_info',
+    "td.info #js_info",
     # Fairlane / pararius.com
-    'div.vc div.text-box h2'
+    "div.vc div.text-box h2",
 ]
 
-TURNSTILE_SELECTORS = [
-    "input[name='cf-turnstile-response']"
-]
+TURNSTILE_SELECTORS = ["input[name='cf-turnstile-response']"]
 
 SHORT_TIMEOUT = 1
 SESSIONS_STORAGE = SessionsStorage()
@@ -69,7 +87,7 @@ def test_browser_installation():
         logging.info("Chrome / Chromium path: " + chrome_exe_path)
 
     chrome_major_version = utils.get_chrome_major_version()
-    if chrome_major_version == '':
+    if chrome_major_version == "":
         logging.error("Chrome / Chromium version not detected!")
         sys.exit(1)
     else:
@@ -131,15 +149,15 @@ def _controller_v1_handler(req: V1RequestBase) -> V1ResponseBase:
 
     # execute the command
     res: V1ResponseBase
-    if req.cmd == 'sessions.create':
+    if req.cmd == "sessions.create":
         res = _cmd_sessions_create(req)
-    elif req.cmd == 'sessions.list':
+    elif req.cmd == "sessions.list":
         res = _cmd_sessions_list(req)
-    elif req.cmd == 'sessions.destroy':
+    elif req.cmd == "sessions.destroy":
         res = _cmd_sessions_destroy(req)
-    elif req.cmd == 'request.get':
+    elif req.cmd == "request.get":
         res = _cmd_request_get(req)
-    elif req.cmd == 'request.post':
+    elif req.cmd == "request.post":
         res = _cmd_request_post(req)
     else:
         raise Exception(f"Request parameter 'cmd' = '{req.cmd}' is invalid.")
@@ -158,7 +176,7 @@ def _cmd_request_get(req: V1RequestBase) -> V1ResponseBase:
     if req.download is not None:
         logging.warning("Request parameter 'download' was removed in FlareSolverr v2.")
 
-    challenge_res = _resolve_challenge(req, 'GET')
+    challenge_res = _resolve_challenge(req, "GET")
     res = V1ResponseBase({})
     res.status = challenge_res.status
     res.message = challenge_res.message
@@ -175,7 +193,7 @@ def _cmd_request_post(req: V1RequestBase) -> V1ResponseBase:
     if req.download is not None:
         logging.warning("Request parameter 'download' was removed in FlareSolverr v2.")
 
-    challenge_res = _resolve_challenge(req, 'POST')
+    challenge_res = _resolve_challenge(req, "POST")
     res = V1ResponseBase({})
     res.status = challenge_res.status
     res.message = challenge_res.message
@@ -190,27 +208,15 @@ def _cmd_sessions_create(req: V1RequestBase) -> V1ResponseBase:
     session_id = session.session_id
 
     if not fresh:
-        return V1ResponseBase({
-            "status": STATUS_OK,
-            "message": "Session already exists.",
-            "session": session_id
-        })
+        return V1ResponseBase({"status": STATUS_OK, "message": "Session already exists.", "session": session_id})
 
-    return V1ResponseBase({
-        "status": STATUS_OK,
-        "message": "Session created successfully.",
-        "session": session_id
-    })
+    return V1ResponseBase({"status": STATUS_OK, "message": "Session created successfully.", "session": session_id})
 
 
 def _cmd_sessions_list(req: V1RequestBase) -> V1ResponseBase:
     session_ids = SESSIONS_STORAGE.session_ids()
 
-    return V1ResponseBase({
-        "status": STATUS_OK,
-        "message": "",
-        "sessions": session_ids
-    })
+    return V1ResponseBase({"status": STATUS_OK, "message": "", "sessions": session_ids})
 
 
 def _cmd_sessions_destroy(req: V1RequestBase) -> V1ResponseBase:
@@ -220,10 +226,7 @@ def _cmd_sessions_destroy(req: V1RequestBase) -> V1ResponseBase:
     if not existed:
         raise Exception("The session doesn't exist.")
 
-    return V1ResponseBase({
-        "status": STATUS_OK,
-        "message": "The session has been removed."
-    })
+    return V1ResponseBase({"status": STATUS_OK, "message": "The session has been removed."})
 
 
 def _resolve_challenge(req: V1RequestBase, method: str) -> ChallengeResolutionT:
@@ -238,24 +241,26 @@ def _resolve_challenge(req: V1RequestBase, method: str) -> ChallengeResolutionT:
             if fresh:
                 logging.debug(f"new session created to perform the request (session_id={session_id})")
             else:
-                logging.debug(f"existing session is used to perform the request (session_id={session_id}, "
-                              f"lifetime={str(session.lifetime())}, ttl={str(ttl)})")
+                logging.debug(
+                    f"existing session is used to perform the request (session_id={session_id}, "
+                    f"lifetime={str(session.lifetime())}, ttl={str(ttl)})"
+                )
 
             driver = session.driver
         else:
             driver = utils.get_webdriver(req.proxy)
-            logging.debug('New instance of webdriver has been created to perform the request')
+            logging.debug("New instance of webdriver has been created to perform the request")
         return func_timeout(timeout, _evil_logic, (req, driver, method))
     except FunctionTimedOut:
-        raise Exception(f'Error solving the challenge. Timeout after {timeout} seconds.')
+        raise Exception(f"Error solving the challenge. Timeout after {timeout} seconds.")
     except Exception as e:
-        raise Exception('Error solving the challenge. ' + str(e).replace('\n', '\\n'))
+        raise Exception("Error solving the challenge. " + str(e).replace("\n", "\\n"))
     finally:
         if not req.session and driver is not None:
             if utils.PLATFORM_VERSION == "nt":
                 driver.close()
             driver.quit()
-            logging.debug('A used instance of webdriver has been destroyed')
+            logging.debug("A used instance of webdriver has been destroyed")
 
 
 def click_verify(driver: WebDriver, num_tabs: int = 1):
@@ -267,7 +272,7 @@ def click_verify(driver: WebDriver, num_tabs: int = 1):
             actions.send_keys(Keys.TAB).pause(0.1)
         actions.pause(1)
         actions.send_keys(Keys.SPACE).perform()
-        
+
         logging.debug(f"Cloudflare verify checkbox clicked after {num_tabs} tabs!")
     except Exception:
         logging.debug("Cloudflare verify checkbox not found on the page.")
@@ -291,6 +296,7 @@ def click_verify(driver: WebDriver, num_tabs: int = 1):
 
     time.sleep(2)
 
+
 def _get_turnstile_token(driver: WebDriver, tabs: int):
     token_input = driver.find_element(By.CSS_SELECTOR, "input[name='cf-turnstile-response']")
     current_value = token_input.get_attribute("value")
@@ -301,28 +307,31 @@ def _get_turnstile_token(driver: WebDriver, tabs: int):
             if turnstile_token != current_value:
                 logging.info(f"Turnstile token: {turnstile_token}")
                 return turnstile_token
-        logging.debug(f"Failed to extract token possibly click failed")        
+        logging.debug(f"Failed to extract token possibly click failed")
 
         # reset focus
-        driver.execute_script("""
+        driver.execute_script(
+            """
             let el = document.createElement('button');
             el.style.position='fixed';
             el.style.top='0';
             el.style.left='0';
             document.body.prepend(el);
             el.focus();
-        """)
+        """
+        )
         time.sleep(1)
+
 
 def _resolve_turnstile_captcha(req: V1RequestBase, driver: WebDriver):
     turnstile_token = None
     if req.tabs_till_verify is not None:
-        logging.debug(f'Navigating to... {req.url} in order to pass the turnstile challenge')
+        logging.debug(f"Navigating to... {req.url} in order to pass the turnstile challenge")
         driver.get(req.url)
 
         turnstile_challenge_found = False
         for selector in TURNSTILE_SELECTORS:
-            found_elements = driver.find_elements(By.CSS_SELECTOR, selector)   
+            found_elements = driver.find_elements(By.CSS_SELECTOR, selector)
             if len(found_elements) > 0:
                 turnstile_challenge_found = True
                 logging.info("Turnstile challenge detected. Selector found: " + selector)
@@ -330,8 +339,9 @@ def _resolve_turnstile_captcha(req: V1RequestBase, driver: WebDriver):
         if turnstile_challenge_found:
             turnstile_token = _get_turnstile_token(driver=driver, tabs=req.tabs_till_verify)
         else:
-            logging.debug(f'Turnstile challenge not found')
+            logging.debug(f"Turnstile challenge not found")
     return turnstile_token
+
 
 def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> ChallengeResolutionT:
     res = ChallengeResolutionT({})
@@ -345,16 +355,50 @@ def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> Challenge
     if disable_media:
         block_urls = [
             # Images
-            "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp", "*.svg", "*.ico",
-            "*.PNG", "*.JPG", "*.JPEG", "*.GIF", "*.WEBP", "*.BMP", "*.SVG", "*.ICO",
-            "*.tiff", "*.tif", "*.jpe", "*.apng", "*.avif", "*.heic", "*.heif",
-            "*.TIFF", "*.TIF", "*.JPE", "*.APNG", "*.AVIF", "*.HEIC", "*.HEIF",
+            "*.png",
+            "*.jpg",
+            "*.jpeg",
+            "*.gif",
+            "*.webp",
+            "*.bmp",
+            "*.svg",
+            "*.ico",
+            "*.PNG",
+            "*.JPG",
+            "*.JPEG",
+            "*.GIF",
+            "*.WEBP",
+            "*.BMP",
+            "*.SVG",
+            "*.ICO",
+            "*.tiff",
+            "*.tif",
+            "*.jpe",
+            "*.apng",
+            "*.avif",
+            "*.heic",
+            "*.heif",
+            "*.TIFF",
+            "*.TIF",
+            "*.JPE",
+            "*.APNG",
+            "*.AVIF",
+            "*.HEIC",
+            "*.HEIF",
             # Stylesheets
             "*.css",
             "*.CSS",
             # Fonts
-            "*.woff", "*.woff2", "*.ttf", "*.otf", "*.eot",
-            "*.WOFF", "*.WOFF2", "*.TTF", "*.OTF", "*.EOT"
+            "*.woff",
+            "*.woff2",
+            "*.ttf",
+            "*.otf",
+            "*.eot",
+            "*.WOFF",
+            "*.WOFF2",
+            "*.TTF",
+            "*.OTF",
+            "*.EOT",
         ]
         try:
             logging.debug("Network.setBlockedURLs: %s", block_urls)
@@ -378,12 +422,12 @@ def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> Challenge
 
     # set cookies if required
     if req.cookies is not None and len(req.cookies) > 0:
-        logging.debug(f'Setting cookies...')
+        logging.debug(f"Setting cookies...")
         for cookie in req.cookies:
-            driver.delete_cookie(cookie['name'])
+            driver.delete_cookie(cookie["name"])
             driver.add_cookie(cookie)
         # reload the page
-        if method == 'POST':
+        if method == "POST":
             _post_request(req, driver)
         else:
             driver.get(req.url)
@@ -397,14 +441,12 @@ def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> Challenge
     # find access denied titles
     for title in ACCESS_DENIED_TITLES:
         if page_title.startswith(title):
-            raise Exception('Cloudflare has blocked this request. '
-                            'Probably your IP is banned for this site, check in your web browser.')
+            raise Exception("Cloudflare has blocked this request. " "Probably your IP is banned for this site, check in your web browser.")
     # find access denied selectors
     for selector in ACCESS_DENIED_SELECTORS:
         found_elements = driver.find_elements(By.CSS_SELECTOR, selector)
         if len(found_elements) > 0:
-            raise Exception('Cloudflare has blocked this request. '
-                            'Probably your IP is banned for this site, check in your web browser.')
+            raise Exception("Cloudflare has blocked this request. " "Probably your IP is banned for this site, check in your web browser.")
 
     # find challenge by title
     challenge_found = False
@@ -435,8 +477,7 @@ def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> Challenge
                 # then wait until all the selectors disappear
                 for selector in CHALLENGE_SELECTORS:
                     logging.debug("Waiting for selector (attempt " + str(attempt) + "): " + selector)
-                    WebDriverWait(driver, SHORT_TIMEOUT).until_not(
-                        presence_of_element_located((By.CSS_SELECTOR, selector)))
+                    WebDriverWait(driver, SHORT_TIMEOUT).until_not(presence_of_element_located((By.CSS_SELECTOR, selector)))
 
                 # all elements not found
                 break
@@ -482,32 +523,94 @@ def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> Challenge
     if req.returnScreenshot:
         challenge_res.screenshot = driver.get_screenshot_as_base64()
 
+    if req.download:
+        resp = []
+
+        # Check if specific URLs were provided
+        if hasattr(req, "downloadUrls") and req.downloadUrls:
+            # Download specific URLs provided by the client
+            logging.info(f"Downloading {len(req.downloadUrls)} specific image URLs...")
+            image_urls = req.downloadUrls
+        else:
+            # Fallback: Find all img tags on the page
+            logging.info("No specific URLs provided, finding all images on page...")
+            img_elements = driver.find_elements(By.TAG_NAME, "img")
+            image_urls = []
+            for img in img_elements:
+                try:
+                    src = img.get_attribute("src")
+                    if src:
+                        image_urls.append(urljoin(driver.current_url, src))
+                except Exception as e:
+                    logging.error(f"Error extracting image URL: {e}")
+
+        # Download each image URL using browser fetch
+        for img_url in image_urls:
+            try:
+                # Use browser fetch to download image (bypasses server-side blocks)
+                b64_data = driver.execute_script(
+                    """
+                    return fetch(arguments[0])
+                        .then(r => {
+                            if (!r.ok) throw new Error('HTTP ' + r.status);
+                            return r.blob();
+                        })
+                        .then(b => new Promise((resolve) => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                            reader.readAsDataURL(b);
+                        }));
+                """,
+                    img_url,
+                )
+
+                if b64_data:
+                    logging.info(f"Downloaded {img_url}")
+                    filename = os.path.basename(urlsplit(img_url).path)
+                    mime_type = "image/jpeg"  # Default, browser fetch doesn't expose headers easily
+
+                    r = {"url": f"{img_url}", "filename": f"{filename}", "mime_type": f"{mime_type}", "encoded_data": f"{b64_data}"}
+                    print(r)
+                    resp.append(r)
+                else:
+                    logging.error(f"No data returned for: {img_url}")
+            except Exception as e:
+                logging.error(f"Error downloading {img_url}: {e}")
+
+        if not resp:
+            logging.error("No Images Downloaded!")
+            res.message = "No Images Downloaded!"
+        else:
+            logging.info(f"Successfully downloaded {len(resp)} images!")
+            res.message = f"Successfully downloaded {len(resp)} images!"
+            challenge_res.download = resp
+
     res.result = challenge_res
     return res
 
 
 def _post_request(req: V1RequestBase, driver: WebDriver):
     post_form = f'<form id="hackForm" action="{req.url}" method="POST">'
-    query_string = req.postData if req.postData and req.postData[0] != '?' else req.postData[1:] if req.postData else ''
-    pairs = query_string.split('&')
+    query_string = req.postData if req.postData and req.postData[0] != "?" else req.postData[1:] if req.postData else ""
+    pairs = query_string.split("&")
     for pair in pairs:
-        parts = pair.split('=', 1)
+        parts = pair.split("=", 1)
         # noinspection PyBroadException
         try:
             name = unquote(parts[0])
         except Exception:
             name = parts[0]
-        if name == 'submit':
+        if name == "submit":
             continue
         # noinspection PyBroadException
         try:
-            value = unquote(parts[1]) if len(parts) > 1 else ''
+            value = unquote(parts[1]) if len(parts) > 1 else ""
         except Exception:
-            value = parts[1] if len(parts) > 1 else ''
+            value = parts[1] if len(parts) > 1 else ""
         # Protection of " character, for syntax
-        value=value.replace('"','&quot;')
+        value = value.replace('"', "&quot;")
         post_form += f'<input type="text" name="{escape(quote(name))}" value="{escape(quote(value))}"><br>'
-    post_form += '</form>'
+    post_form += "</form>"
     html_content = f"""
         <!DOCTYPE html>
         <html>
