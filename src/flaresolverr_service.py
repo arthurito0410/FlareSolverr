@@ -570,7 +570,6 @@ def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> Challenge
                     mime_type = "image/jpeg"  # Default, browser fetch doesn't expose headers easily
 
                     r = {"url": f"{img_url}", "filename": f"{filename}", "mime_type": f"{mime_type}", "encoded_data": f"{b64_data}"}
-                    print(r)
                     resp.append(r)
                 else:
                     logging.error(f"No data returned for: {img_url}")
