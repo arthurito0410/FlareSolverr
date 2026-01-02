@@ -8,7 +8,7 @@ from datetime import timedelta
 from html import escape
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
-import requests
+import magic
 from func_timeout import FunctionTimedOut, func_timeout
 from selenium.common import TimeoutException
 from selenium.webdriver.chrome.webdriver import WebDriver
@@ -530,22 +530,22 @@ def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> Challenge
         if hasattr(req, "downloadUrls") and req.downloadUrls:
             # Download specific URLs provided by the client
             logging.info(f"Downloading {len(req.downloadUrls)} specific image URLs...")
-            image_urls = req.downloadUrls
+            file_urls = req.downloadUrls
         else:
             # Fallback: Find all img tags on the page
             logging.info("No specific URLs provided, finding all images on page...")
             img_elements = driver.find_elements(By.TAG_NAME, "img")
-            image_urls = []
+            file_urls = []
             for img in img_elements:
                 try:
                     src = img.get_attribute("src")
                     if src:
-                        image_urls.append(urljoin(driver.current_url, src))
+                        file_urls.append(urljoin(driver.current_url, src))
                 except Exception as e:
                     logging.error(f"Error extracting image URL: {e}")
 
         # Download each image URL using browser fetch
-        for img_url in image_urls:
+        for file_url in file_urls:
             try:
                 # Use browser fetch to download image (bypasses server-side blocks)
                 b64_data = driver.execute_script(
@@ -561,20 +561,23 @@ def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> Challenge
                             reader.readAsDataURL(b);
                         }));
                 """,
-                    img_url,
+                    file_url,
                 )
 
                 if b64_data:
-                    logging.info(f"Downloaded {img_url}")
-                    filename = os.path.basename(urlsplit(img_url).path)
-                    mime_type = "image/jpeg"  # Default, browser fetch doesn't expose headers easily
+                    data = base64.b64decode(b64_data)
+                    mime = magic.Magic(mime=True)
+                    content_type = mime.from_buffer(data)
+                    logging.info(f"Downloaded {file_url}")
+                    filename = os.path.basename(urlsplit(file_url).path)
+                    mime_type = content_type  # Default, browser fetch doesn't expose headers easily
 
-                    r = {"url": f"{img_url}", "filename": f"{filename}", "mime_type": f"{mime_type}", "encoded_data": f"{b64_data}"}
+                    r = {"url": f"{file_url}", "filename": f"{filename}", "mime_type": f"{mime_type}", "encoded_data": f"{b64_data}"}
                     resp.append(r)
                 else:
-                    logging.error(f"No data returned for: {img_url}")
+                    logging.error(f"No data returned for: {file_url}")
             except Exception as e:
-                logging.error(f"Error downloading {img_url}: {e}")
+                logging.error(f"Error downloading {file_url}: {e}")
 
         if not resp:
             logging.error("No Images Downloaded!")
